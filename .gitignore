@@ -1,2 +1,5 @@
 __pycache__
 *.db
+# Ignore all SQL files except the sample schema
+*.sql
+!schema.sql
