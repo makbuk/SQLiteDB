@@ -118,8 +118,18 @@ def import_csv(
     # Check the table exists in the DB
     db_columns = get_table_columns(conn, table)
     if not db_columns:
-        print(f"[ERROR] Table '{table}' not found in database. "
-              f"Run csv_to_schema.py + create_db.py first.")
+        # Show available tables to help the user pick the right name
+        available = [
+            row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+        ]
+        print(f"[ERROR] Table '{table}' not found in database.")
+        if available:
+            print(f"  Available tables: {available}")
+            print(f"  Use --table <name> to specify the target table.")
+        else:
+            print("  Database has no tables. Run create_db.py first.")
         sys.exit(1)
 
     delimiter = detect_delimiter(csv_path)
