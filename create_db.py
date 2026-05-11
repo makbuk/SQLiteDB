@@ -6,58 +6,83 @@ Usage:
     python create_db.py --schema my.sql          # custom schema file
     python create_db.py --db my.db               # custom database file
     python create_db.py --schema s.sql --db d.db # both arguments
+
+If the database file already exists, the script asks interactively:
+    1) Replace — back up the current DB and create a fresh one from schema.
+    2) Adapt   — back up the current DB, then add missing tables/columns from schema
+                 (tables not present in the schema are left untouched).
+    3) Cancel  — abort without any changes.
+
+For recurring migrations (option 2 above) use migrate_db.py directly.
 """
 
-import sqlite3
 import argparse
+import sqlite3
 import sys
 from pathlib import Path
 
+from db_utils import list_objects, make_backup, op_adapt, read_schema
 
-def create_database(schema_path: Path, db_path: Path) -> None:
-    """Create a SQLite database by executing the given schema file."""
 
-    # --- Validate the schema file ---
-    if not schema_path.exists():
-        print(f"[ERROR] Schema file not found: {schema_path}")
-        sys.exit(1)
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-    sql = schema_path.read_text(encoding="utf-8").strip()
-    if not sql:
-        print(f"[ERROR] Schema file is empty: {schema_path}")
-        sys.exit(1)
+def ask_action() -> str:
+    """
+    Prompt the user to choose what to do with an existing database.
+    Returns '1' (replace), '2' (adapt), or '3' (cancel).
+    """
+    print("\nDatabase already exists. Choose an action:")
+    print("  1) Replace — back up current DB and create a fresh one from schema")
+    print("  2) Adapt   — back up current DB and apply missing changes from schema")
+    print("  3) Cancel  — abort, leave everything unchanged")
+    while True:
+        choice = input("Enter 1, 2, or 3: ").strip()
+        if choice in ("1", "2", "3"):
+            return choice
+        print("  Please enter 1, 2, or 3.")
 
-    # --- Create (or reopen) the database ---
+
+# ---------------------------------------------------------------------------
+# Core operations
+# ---------------------------------------------------------------------------
+
+def op_replace(db_path: Path, sql: str) -> None:
+    """Back up the existing DB, delete it, and create a fresh one from schema."""
+    make_backup(db_path)
+    db_path.unlink()  # remove the old file
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    existed = db_path.exists()
 
     try:
         with sqlite3.connect(db_path) as conn:
-            conn.executescript(sql)   # execute the entire schema in one shot
+            conn.executescript(sql)
             conn.commit()
     except sqlite3.Error as exc:
         print(f"[ERROR] SQLite: {exc}")
         sys.exit(1)
 
-    action = "updated" if existed else "created"
-    print(f"[OK] Database {action}: {db_path.resolve()}")
+    print(f"[OK] Database replaced: {db_path.resolve()}")
+    list_objects(db_path)
 
-    # --- List all objects created in the database ---
-    with sqlite3.connect(db_path) as conn:
-        cur = conn.execute(
-            "SELECT type, name FROM sqlite_master "
-            "WHERE type IN ('table', 'view', 'index', 'trigger') "
-            "ORDER BY type, name"
-        )
-        rows = cur.fetchall()
 
-    if rows:
-        print("\nDatabase objects:")
-        for obj_type, name in rows:
-            print(f"  [{obj_type}] {name}")
-    else:
-        print("\nDatabase is empty — the schema contains no objects.")
+def op_create_new(db_path: Path, sql: str) -> None:
+    """Create a brand-new database from schema (no existing DB)."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.executescript(sql)
+            conn.commit()
+    except sqlite3.Error as exc:
+        print(f"[ERROR] SQLite: {exc}")
+        sys.exit(1)
+    print(f"[OK] Database created: {db_path.resolve()}")
+    list_objects(db_path)
 
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -73,7 +98,23 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    create_database(Path(args.schema), Path(args.db))
+    schema_path = Path(args.schema)
+    db_path     = Path(args.db)
+
+    sql = read_schema(schema_path)
+
+    if not db_path.exists():
+        # Fresh start — no questions asked
+        op_create_new(db_path, sql)
+    else:
+        choice = ask_action()
+        if choice == "1":
+            op_replace(db_path, sql)
+        elif choice == "2":
+            op_adapt(db_path, sql)
+        else:
+            print("[CANCELLED] No changes were made.")
+            sys.exit(0)
 
 
 if __name__ == "__main__":
