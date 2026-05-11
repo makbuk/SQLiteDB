@@ -68,6 +68,30 @@ Conflict strategies:
 
 ---
 
+### `db_to_schema.py` — Extract schema from an existing database
+
+Reads a live SQLite database and emits `CREATE TABLE`, `CREATE INDEX`, and `CREATE VIEW` statements, along with relevant PRAGMA settings.
+
+```
+python db_to_schema.py database.db                        # print to stdout
+python db_to_schema.py database.db --output schema.sql    # save to file
+python db_to_schema.py database.db --output schema.sql --overwrite
+```
+
+---
+
+### `compare_schema.py` — Diff two SQL schema files
+
+Compares two schema files and reports new/removed tables, column changes (type, position), and added/removed indexes and views. Exit code `0` means identical, `1` means differences found.
+
+```
+python compare_schema.py schema_v1.sql schema_v2.sql
+python compare_schema.py schema_v1.sql schema_v2.sql --diff-only
+python compare_schema.py schema_v1.sql schema_v2.sql --output diff.txt
+```
+
+---
+
 ### `db_utils.py` — Shared utilities
 
 Internal helpers used by the other scripts: schema reading, database backups, object listing, and the adapt (migration) logic.
